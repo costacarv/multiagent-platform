@@ -9,7 +9,7 @@ spec:
   replicas: {{ .Values.api.replicaCount }}
   strategy:
     type: Recreate
-    
+    rollingUpdate: null
   selector:
     matchLabels:
       app: {{ .Values.api.name }}
