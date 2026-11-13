@@ -1,4 +1,4 @@
-name: CI/CD - Enterprise Multi-Agent Platform
+name: CI/CD - Enterprise Multi-Agent Platform 
 
 on:
   push:
