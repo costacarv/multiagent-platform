@@ -1,0 +1,6 @@
+apiVersion: v2
+name: multiagent-platform
+description: Plataforma Multi-Agente de Due Diligence e Analise de Risco
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

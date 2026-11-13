@@ -1,0 +1,97 @@
+name: CI/CD - Enterprise Multi-Agent Platform
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: multiagent-eks-cluster
+  ECR_API_REPO: multiagent-api
+  ECR_FRONTEND_REPO: multiagent-frontend
+  K8S_NAMESPACE: agents-prod
+  HELM_RELEASE: multiagent-platform
+
+jobs:
+  test:
+    name: Testes Automatizados (Pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências e rodar testes
+        env:
+          GROQ_API_KEY: "dummy-key-for-tests"
+          API_KEY: "dummy-api-key-for-tests"
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest httpx
+          pytest
+
+  build-and-deploy:
+    name: Build Docker, Push ECR e Deploy EKS
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login no Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build e Push da API (FastAPI)
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG
+
+      - name: Build e Push do Front-end (Streamlit)
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG ./app/frontend
+          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG
+
+      - name: Configurar kubeconfig para o EKS
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: Deploy no EKS via Helm
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          helm upgrade --install ${{ env.HELM_RELEASE }} ./k8s/helm/multiagent-platform \
+            --namespace ${{ env.K8S_NAMESPACE }} \
+            --create-namespace \
+            --set api.image.repository="$ECR_REGISTRY/$ECR_API_REPO" \
+            --set api.image.tag="$IMAGE_TAG" \
+            --set frontend.image.repository="$ECR_REGISTRY/$ECR_FRONTEND_REPO" \
+            --set frontend.image.tag="$IMAGE_TAG" \
+            --set api.resources.requests.cpu="50m" \
+            --set api.resources.requests.memory="64Mi" \
+            --set frontend.resources.requests.cpu="50m" \
+            --set frontend.resources.requests.memory="64Mi" \
+            --set secrets.groqApiKey="${{ secrets.GROQ_API_KEY }}" \
+            --set secrets.apiKey="${{ secrets.API_KEY }}" \
+            --wait --timeout 5m
