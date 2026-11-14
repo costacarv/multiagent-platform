@@ -13,15 +13,32 @@ resource "aws_ecr_repository" "app_repos" {
   }
 }
 
-resource "aws_ecr_lifecycle_policy" "cleanup_old_images" {
-  for_each   = aws_ecr_repository.app_repos
-  repository = each.value.name
+resource "aws_ecr_lifecycle_policy" "cleanup_policy" {
+  for_each = toset([
+    aws_ecr_repository.api.name,
+    aws_ecr_repository.frontend.name
+  ])
+
+  repository = each.value
 
   policy = jsonencode({
     rules = [
       {
         rulePriority = 1
-        description  = "Mantém apenas as últimas 5 imagens para evitar custos de armazenamento"
+        description  = "Remove imagens sem tag apos 1 dia"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 1
+        }
+        action = {
+          type = "expire"
+        }
+      },
+      {
+        rulePriority = 2
+        description  = "Mantem apenas as 5 imagens mais recentes"
         selection = {
           tagStatus   = "any"
           countType   = "imageCountMoreThan"
