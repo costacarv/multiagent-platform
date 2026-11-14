@@ -14,12 +14,9 @@ resource "aws_ecr_repository" "app_repos" {
 }
 
 resource "aws_ecr_lifecycle_policy" "cleanup_policy" {
-  for_each = toset([
-    aws_ecr_repository.api.name,
-    aws_ecr_repository.frontend.name
-  ])
+  for_each = aws_ecr_repository.app_repos
 
-  repository = each.value
+  repository = each.value.name
 
   policy = jsonencode({
     rules = [
